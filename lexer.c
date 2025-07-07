@@ -68,10 +68,26 @@ void token_free(Token* token) {
 }
 
 Token lexer_next_token(Lexer* lexer) {
-    skip_whitespace(lexer);
+    while (1) { // Loop to skip comments and find the next actual token
+        skip_whitespace(lexer);
 
-    if (peek(lexer) == '\0') {
-        return create_token(TOKEN_EOF, "", 0, lexer->line, lexer->column);
+        if (peek(lexer) == '\0') {
+            return create_token(TOKEN_EOF, "", 0, lexer->line, lexer->column);
+        }
+
+        // Check for comments
+        if (peek(lexer) == '/' && peek_next(lexer) == '/') {
+            // It's a comment, consume until newline or EOF
+            while (peek(lexer) != '\n' && peek(lexer) != '\0') {
+                advance(lexer);
+            }
+            // If it was a newline, skip_whitespace in the next iteration will handle it.
+            // If it was EOF, the EOF check at the beginning of the loop will handle it.
+            continue; // Restart loop to find the next token
+        }
+
+        // If not a comment and not EOF, proceed to tokenize
+        break; // Exit loop and proceed to tokenization
     }
 
     int start_pos = lexer->position;

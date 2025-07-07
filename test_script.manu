@@ -1,0 +1,10 @@
+// Test 1: Basic var declaration and println
+var x[] = 100;
+println(x);
+
+var y[] = 200;
+println(y + 5);
+
+// Expected output:
+// 100
+// 205

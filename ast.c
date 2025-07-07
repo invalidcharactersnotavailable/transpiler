@@ -1,6 +1,7 @@
+#include <string.h> // For strdup
 #include "ast.h"
 #include <stdlib.h>
-#include <string.h>
+// Ensure string.h is definitely at the top or very early
 
 ASTNode* ast_node_new(NodeType type) {
     ASTNode* node = (ASTNode*)malloc(sizeof(ASTNode));
@@ -161,22 +162,37 @@ IndexExpression* index_expression_new(ASTNode* array, ASTNode* index) {
     return index_expr;
 }
 
+void ast_node_list_free(ASTNode* node_list) {
+    ASTNode* current = node_list;
+    ASTNode* next;
+    while (current != NULL) {
+        next = current->next;
+        ast_node_free(current); // Free the node itself
+        current = next;
+    }
+}
+
 void ast_node_free(ASTNode* node) {
     if (!node) return;
 
+    // Free members specific to each node type
+    // For pointers to other ASTNodes that are NOT part of a list managed by 'next',
+    // call ast_node_free.
+    // For pointers to ASTNode lists (like statements, parameters),
+    // call ast_node_list_free.
     switch (node->type) {
         case NODE_PROGRAM:
-            ast_node_free(((Program*)node)->statements);
+            ast_node_list_free(((Program*)node)->statements);
             break;
         case NODE_VAR_DECLARATION:
             free(((VarDeclaration*)node)->name);
-            ast_node_free(((VarDeclaration*)node)->size);
-            ast_node_free(((VarDeclaration*)node)->value);
+            ast_node_free(((VarDeclaration*)node)->size); // size is a single expression
+            ast_node_free(((VarDeclaration*)node)->value); // value is a single expression
             break;
         case NODE_FUNCTION_DECLARATION:
             free(((FunctionDeclaration*)node)->name);
-            ast_node_free(((FunctionDeclaration*)node)->parameters);
-            ast_node_free(((FunctionDeclaration*)node)->body);
+            ast_node_list_free(((FunctionDeclaration*)node)->parameters); // parameters is a list
+            ast_node_free(((FunctionDeclaration*)node)->body); // body is a single BlockStatement
             break;
         case NODE_RETURN_STATEMENT:
             ast_node_free(((ReturnStatement*)node)->return_value);
@@ -185,7 +201,7 @@ void ast_node_free(ASTNode* node) {
             ast_node_free(((ExpressionStatement*)node)->expression);
             break;
         case NODE_BLOCK_STATEMENT:
-            ast_node_free(((BlockStatement*)node)->statements);
+            ast_node_list_free(((BlockStatement*)node)->statements); // statements is a list
             break;
         case NODE_IDENTIFIER:
             free(((Identifier*)node)->value);
@@ -200,27 +216,29 @@ void ast_node_free(ASTNode* node) {
             free(((StringLiteral*)node)->value);
             break;
         case NODE_ASSIGN_EXPRESSION:
+            // Note: AssignExpression->name could be an Identifier or IndexExpression.
+            // It's a single node, not a list.
             ast_node_free(((AssignExpression*)node)->name);
             ast_node_free(((AssignExpression*)node)->value);
             break;
         case NODE_CALL_EXPRESSION:
-            ast_node_free(((CallExpression*)node)->function);
-            ast_node_free(((CallExpression*)node)->arguments);
+            ast_node_free(((CallExpression*)node)->function); // function is a single expression (e.g. identifier)
+            ast_node_list_free(((CallExpression*)node)->arguments); // arguments is a list of expressions
             break;
         case NODE_FOR_LOOP:
             ast_node_free(((ForLoop*)node)->init);
             ast_node_free(((ForLoop*)node)->condition);
             ast_node_free(((ForLoop*)node)->increment);
-            ast_node_free(((ForLoop*)node)->body);
+            ast_node_free(((ForLoop*)node)->body); // body is a single BlockStatement
             break;
         case NODE_WHILE_LOOP:
             ast_node_free(((WhileLoop*)node)->condition);
-            ast_node_free(((WhileLoop*)node)->body);
+            ast_node_free(((WhileLoop*)node)->body); // body is a single BlockStatement
             break;
         case NODE_IMPORT_STATEMENT:
             free(((ImportStatement*)node)->path);
             if (((ImportStatement*)node)->alias) free(((ImportStatement*)node)->alias);
-            ast_node_free(((ImportStatement*)node)->imports);
+            ast_node_list_free(((ImportStatement*)node)->imports); // imports is a list of identifiers
             break;
         case NODE_BINARY_EXPRESSION:
             ast_node_free(((BinaryExpression*)node)->left);
@@ -230,9 +248,13 @@ void ast_node_free(ASTNode* node) {
             ast_node_free(((IndexExpression*)node)->array);
             ast_node_free(((IndexExpression*)node)->index);
             break;
+        // No default case needed as all node types should be handled.
+        // If a new node type is added, it must be added here.
     }
 
-    ast_node_free(node->next);
+    // Free the node itself. The 'next' pointer is handled by ast_node_list_free
+    // for nodes that are part of a list. Individual nodes not in lists will have 'next' as NULL
+    // or it's managed by their parent list structure.
     free(node);
 }
 

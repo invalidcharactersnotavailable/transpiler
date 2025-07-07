@@ -169,6 +169,7 @@ BinaryExpression* binary_expression_new(ASTNode* left, BinaryOperator operator, 
 IndexExpression* index_expression_new(ASTNode* array, ASTNode* index);
 
 void ast_node_free(ASTNode* node);
+void ast_node_list_free(ASTNode* node_list);
 
 #endif // AST_H
 

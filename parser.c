@@ -1,7 +1,8 @@
-#include <string.h>
+#include <string.h> // For strdup
 #include "parser.h"
 #include <stdio.h>
 #include <stdlib.h>
+// Ensure string.h is definitely at the top or very early
 
 static void next_token(Parser* parser) {
     token_free(&parser->current_token);
@@ -47,9 +48,19 @@ static ASTNode* parse_var_declaration(Parser* parser) {
 
     if (parser->current_token.type == TOKEN_LBRACKET) {
         next_token(parser); // consume '['
-        size = parse_expression(parser, 0);
+        if (parser->current_token.type == TOKEN_RBRACKET) {
+            // Empty size, e.g., x[]
+            size = NULL; // Or a specific node type for empty size if needed later
+        } else {
+            size = parse_expression(parser, 0);
+            if (!size) { // Error during size expression parsing
+                free(name);
+                return NULL; // Error already printed by parse_expression
+            }
+        }
         if (parser->current_token.type != TOKEN_RBRACKET) {
             fprintf(stderr, "Expected ']' after size in variable declaration at line %d, column %d\n", parser->current_token.line, parser->current_token.column);
+            if (size) ast_node_free(size);
             free(name);
             return NULL;
         }
@@ -102,10 +113,12 @@ static ASTNode* parse_block_statement(Parser* parser) {
                 current = stmt;
             }
         } else {
-            // If parse_statement returns NULL, it means an error occurred and the token was not consumed.
-            // We need to advance the token to avoid an infinite loop.
-            fprintf(stderr, "Skipping unexpected token in block: %s (type %d) at line %d, column %d\n", parser->current_token.value, parser->current_token.type, parser->current_token.line, parser->current_token.column);
-            next_token(parser);
+            // If parse_statement returns NULL, it means an error occurred.
+            // parse_statement's default case (if hit) should have consumed the token.
+            // If a specific parse_X_statement returned NULL without consuming the problematic token,
+            // this next_token call ensures progress.
+            fprintf(stderr, "Error in block: Problem parsing statement starting near token '%s' (type %d) at line %d, column %d. Attempting to recover by skipping token.\n", parser->current_token.value, parser->current_token.type, parser->current_token.line, parser->current_token.column);
+            next_token(parser); // Ensure progress
         }
     }
 
@@ -410,15 +423,19 @@ static ASTNode* parse_prefix_expression(Parser* parser) {
     switch (parser->current_token.type) {
         case TOKEN_IDENTIFIER:
             node = parse_identifier(parser);
+            next_token(parser); // Consume identifier
             break;
         case TOKEN_NUMBER:
             node = (ASTNode*)number_literal_new(parser->current_token.value);
+            next_token(parser); // Consume number
             break;
         case TOKEN_ASCII_LITERAL:
             node = (ASTNode*)ascii_literal_new(parser->current_token.value);
+            next_token(parser); // Consume ASCII literal
             break;
         case TOKEN_STRING_LITERAL:
             node = (ASTNode*)string_literal_new(parser->current_token.value);
+            next_token(parser); // Consume string literal
             break;
         case TOKEN_LPAREN:
             next_token(parser); // consume '('
@@ -544,10 +561,12 @@ Program* parse_program(Parser* parser) {
                 current = stmt;
             }
         } else {
-            // If parse_statement returns NULL, it means an error occurred and the token was not consumed.
-            // We need to advance the token to avoid an infinite loop.
-            fprintf(stderr, "Skipping unexpected token in program: %s (type %d) at line %d, column %d\n", parser->current_token.value, parser->current_token.type, parser->current_token.line, parser->current_token.column);
-            next_token(parser);
+            // If parse_statement returns NULL, it means an error occurred.
+            // parse_statement's default case (if hit) should have consumed the token.
+            // If a specific parse_X_statement returned NULL without consuming the problematic token,
+            // this next_token call ensures progress.
+            fprintf(stderr, "Error in program: Problem parsing statement starting near token '%s' (type %d) at line %d, column %d. Attempting to recover by skipping token.\n", parser->current_token.value, parser->current_token.type, parser->current_token.line, parser->current_token.column);
+            next_token(parser); // Ensure progress
         }
     }
 
