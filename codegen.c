@@ -1,7 +1,8 @@
+#include <string.h> // For strlen, strdup, strndup
 #include "codegen.h"
 #include <stdio.h>
 #include <stdlib.h>
-#include <string.h>
+// Ensure string.h is definitely at the top or very early
 
 static int label_count = 0;
 
@@ -12,26 +13,94 @@ static void generate_label(FILE* output_file, const char* prefix) {
     fprintf(output_file, "%s%d:\n", prefix, label_count++);
 }
 
-static void generate_var_declaration(VarDeclaration* var_decl, FILE* output_file) {
-    fprintf(output_file, "; Variable Declaration: %s\n", var_decl->name);
-    // For simplicity, assume all variables are 8-byte (QWORD) for now
-    // In a real transpiler, type inference would determine size
-    fprintf(output_file, "section .data\n");
-    fprintf(output_file, "%s: dq 0\n", var_decl->name);
+// Helper to switch to .data section if not already there (conceptual)
+// In practice, we'll manage data segment accumulation separately or ensure it's written first.
+// For now, we will ensure .data section directives are appropriately placed.
 
+static void generate_var_declaration_data(VarDeclaration* var_decl, FILE* output_file) {
+    // This function is intended to be called when accumulating .data section parts.
+    // For now, we assume it's called appropriately before .text section generation.
+    fprintf(output_file, "section .data\n");
+    fprintf(output_file, "global %s\n", var_decl->name); // Make variable accessible globally for now
+    fprintf(output_file, "%s: dq 0 ; Default to 0, initialized later if value provided\n", var_decl->name);
+}
+
+static void generate_var_declaration_init(VarDeclaration* var_decl, FILE* output_file) {
+    // This function generates the code to initialize the variable in .text section
     if (var_decl->value) {
-        fprintf(output_file, "section .text\n");
-        fprintf(output_file, "global _start\n"); // For simple programs
-        fprintf(output_file, "_start:\n");
+        fprintf(output_file, "; Initialize Variable: %s\n", var_decl->name);
         generate_expression(var_decl->value, output_file);
         fprintf(output_file, "  pop rax\n");
         fprintf(output_file, "  mov [rel %s], rax\n", var_decl->name);
     }
 }
 
+
+static void generate_println_function(FILE* output_file) {
+    fprintf(output_file, "section .text\n");
+    fprintf(output_file, "global println\n");
+    fprintf(output_file, "println:\n");
+    fprintf(output_file, "  push rbp\n");
+    fprintf(output_file, "  mov rbp, rsp\n");
+    fprintf(output_file, "  sub rsp, 64   ; Allocate space for buffer and locals (e.g., 16 for buffer, rest for alignment/other locals)\n");
+
+    // Assume integer to print is in RDI (first argument by x64 convention)
+    // Convert integer to string (simplified version, handles positive numbers and zero)
+    fprintf(output_file, "  mov rax, rdi       ; RAX = number to print\n");
+    fprintf(output_file, "  lea rsi, [rbp-16] ; RSI = buffer address (16 bytes on stack)\n");
+    fprintf(output_file, "  add rsi, 15      ; Point to the end of the buffer\n");
+    fprintf(output_file, "  mov byte [rsi], 0  ; Null terminator\n");
+    fprintf(output_file, "  dec rsi\n");
+    fprintf(output_file, "  mov rcx, 10        ; Divisor\n");
+
+    fprintf(output_file, ".Lprintln_d2s_loop:\n");
+    fprintf(output_file, "  xor rdx, rdx\n");
+    fprintf(output_file, "  div rcx            ; RAX = RAX / 10, RDX = RAX %% 10\n");
+    fprintf(output_file, "  add rdx, '0'       ; Convert digit to ASCII\n");
+    fprintf(output_file, "  mov [rsi], dl      ; Store digit\n");
+    fprintf(output_file, "  dec rsi\n");
+    fprintf(output_file, "  test rax, rax\n");
+    fprintf(output_file, "  jnz .Lprintln_d2s_loop\n");
+
+    // Handle zero case (if loop didn't run)
+    fprintf(output_file, "  cmp rsi, [rbp-16+14] ; Check if anything was written (rsi moved from end-1)\n");
+    fprintf(output_file, "  jle .Lprintln_d2s_not_zero\n");
+    fprintf(output_file, "  mov byte [rsi], '0'\n");
+    fprintf(output_file, "  dec rsi\n");
+    fprintf(output_file, ".Lprintln_d2s_not_zero:\n");
+
+    fprintf(output_file, "  inc rsi            ; Point to start of the string\n");
+
+    // Calculate length of the string
+    fprintf(output_file, "  lea rdx, [rbp-16+15]\n"); // End of buffer (null terminator position)
+    fprintf(output_file, "  sub rdx, rsi         ; RDX = length\n");
+
+    // Syscall write
+    fprintf(output_file, "  mov rax, 1         ; syscall number for write\n");
+    fprintf(output_file, "  mov rdi, 1         ; stdout file descriptor\n");
+    // RSI already has string address
+    // RDX already has length
+    fprintf(output_file, "  syscall\n");
+
+    // Print newline
+    fprintf(output_file, "  mov rax, 1\n");
+    fprintf(output_file, "  mov rdi, 1\n");
+    fprintf(output_file, "  lea rsi, [rel .Lprintln_newline]\n");
+    fprintf(output_file, "  mov rdx, 1\n");
+    fprintf(output_file, "  syscall\n");
+
+    fprintf(output_file, "  mov rsp, rbp\n");
+    fprintf(output_file, "  pop rbp\n");
+    fprintf(output_file, "  ret\n");
+
+    fprintf(output_file, "section .data\n");
+    fprintf(output_file, ".Lprintln_newline: db 0x0a\n");
+}
+
+
 static void generate_function_declaration(FunctionDeclaration* func_decl, FILE* output_file) {
     fprintf(output_file, "; Function Declaration: %s\n", func_decl->name);
-    fprintf(output_file, "section .text\n");
+    fprintf(output_file, "section .text\n"); // Ensure we are in .text section for function code
     fprintf(output_file, "global %s\n", func_decl->name);
     fprintf(output_file, "%s:\n", func_decl->name);
 
@@ -319,9 +388,13 @@ static void generate_statement(ASTNode* node, FILE* output_file) {
 
     switch (node->type) {
         case NODE_VAR_DECLARATION:
-            generate_var_declaration((VarDeclaration*)node, output_file);
+            // Var declaration is now split into data and init parts
+            // Data part should be emitted globally. Init part is a statement.
+            generate_var_declaration_init((VarDeclaration*)node, output_file);
             break;
         case NODE_FUNCTION_DECLARATION:
+            // Function declarations are handled when iterating top-level statements,
+            // or should be if they are not top-level (which this language might not support yet)
             generate_function_declaration((FunctionDeclaration*)node, output_file);
             break;
         case NODE_RETURN_STATEMENT:
