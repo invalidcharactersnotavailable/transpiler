@@ -8,7 +8,7 @@ x[] = 848484 // int value
 
 ```
 y[] = "hello" // string
-``
+```
 
 ```
 z[] = "why not" + 10a + "maybe yes?" // NUMBERa means ascii code for that char and turns into that character, in this case 10a = newline
